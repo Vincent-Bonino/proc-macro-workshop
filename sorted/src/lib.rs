@@ -1,4 +1,4 @@
-use quote::quote;
+use quote::{quote, ToTokens};
 use proc_macro::TokenStream;
 
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
@@ -13,15 +13,19 @@ pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
     let _ = args;
     let input_item: Item = parse_macro_input!(input);
 
-    match _sorted(None, input_item) {
+    match _sorted(None, &input_item) {
         // Hand the output tokens back to the compiler
-        Ok(result) => TokenStream::from(result),
-        Err(error) => TokenStream::from(error.to_compile_error()),
+        Ok(_) => input_item.to_token_stream().into(),
+        Err(error) => {
+            let err: TokenStream2 = error.to_compile_error();
+            let result: TokenStream2 = quote! { #input_item #err };
+            result.into()
+        },
     }
 }
 
 
-fn _sorted(_args: Option<TokenStream>, input_item: Item) -> Result<TokenStream2, syn::Error> {
+fn _sorted(_args: Option<TokenStream>, input_item: &Item) -> Result<(), syn::Error> {
     // Only work on enums
     if let Item::Enum(input_enum) = input_item.clone() {
 
@@ -32,7 +36,7 @@ fn _sorted(_args: Option<TokenStream>, input_item: Item) -> Result<TokenStream2,
 
         // Return with the full provided input if the list is sorted
         if variants.is_sorted() {
-            return Ok(quote! { #input_item })
+            return Ok(())
         }
 
         // Otherwise, build a correct error
