@@ -1,19 +1,24 @@
-use quote::{quote, ToTokens};
+mod utils;
+mod visitor;
+
 use proc_macro::TokenStream;
 
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
-use syn::{parse_macro_input, Item};
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, Item, ItemFn};
+use syn::visit_mut::VisitMut;
+use crate::utils::find_unsorted_element;
+use crate::visitor::CheckSortedMatch;
 
 const ERROR_MESSAGE: &str = "expected enum or match expression";
 
 
 #[proc_macro_attribute]
-pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn sorted(_args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
-    let _ = args;
     let input_item: Item = parse_macro_input!(input);
 
-    match _sorted(None, &input_item) {
+    match _sorted(&input_item) {
         // Hand the output tokens back to the compiler
         Ok(_) => input_item.to_token_stream().into(),
         Err(error) => {
@@ -24,8 +29,24 @@ pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_attribute]
+pub fn check(_args: TokenStream, input: TokenStream) -> TokenStream {
+    // Parse the input tokens into a syntax tree
+    let input_item: ItemFn = parse_macro_input!(input);
 
-fn _sorted(_args: Option<TokenStream>, input_item: &Item) -> Result<(), syn::Error> {
+    match _check(input_item) {
+        // Hand the output tokens back to the compiler
+        Ok(result) => result.into(),
+        Err((result, error)) => {
+            let err: TokenStream2 = error.to_compile_error();
+            let result: TokenStream2 = quote! { #result #err };
+            result.into()
+        },
+    }
+}
+
+
+fn _sorted(input_item: &Item) -> Result<(), syn::Error> {
     // Only work on enums
     if let Item::Enum(input_enum) = input_item.clone() {
 
@@ -54,30 +75,15 @@ fn _sorted(_args: Option<TokenStream>, input_item: &Item) -> Result<(), syn::Err
     }
 }
 
+fn _check(mut input_item_fn: ItemFn) -> Result<TokenStream2, (TokenStream2, syn::Error)> {
+    let mut visitor: CheckSortedMatch = CheckSortedMatch::new();
+    visitor.visit_item_fn_mut(&mut input_item_fn);
 
-fn find_unsorted_element<T: PartialOrd>(array: &[T]) -> (usize, usize) {
-    let length: usize = array.len();
+    let result: TokenStream2 = quote!{ #input_item_fn };
 
-    let mut unsorted_elmt_index: usize = 0;  // First unsorted element of the array
-    let mut target_elmt_index: usize = 0;  // Position where the unsorted element should be
-
-    // Find which element is not at the right place
-    for i in 1..length {
-        if array[i-1] > array[i] {
-            unsorted_elmt_index = i;
-            break;
-        }
+    if visitor.errors.is_empty() {
+        Ok(result)
+    } else {
+        Err((result, visitor.errors.pop().unwrap()))
     }
-
-    let unsorted_elmt: &T = &array[unsorted_elmt_index];
-
-    // Determine where it should be
-    for j in 0..length {
-        if &array[j] > unsorted_elmt {
-            target_elmt_index = j;
-            break;
-        }
-    }
-
-    (unsorted_elmt_index, target_elmt_index)
 }
