@@ -1,4 +1,5 @@
-use proc_macro2::Ident;
+use proc_macro2::{TokenStream};
+use quote::ToTokens;
 use syn::{visit_mut, Error, ExprMatch, Pat};
 use syn::visit_mut::VisitMut;
 
@@ -21,32 +22,54 @@ impl VisitMut for CheckSortedMatch {
         // Determine if the match expression has an attribute
         let sorted_attribute_idx_opt: Option<usize> = has_sorted_attribute(i);
 
-        // If there is no attribute, continue the visit
         if let Some(sorted_attribute_index) = sorted_attribute_idx_opt {
-            let pattern_idents: Vec<&Ident> = i.arms
+
+            // For each arm, build a tuple:
+            //  - String; use to determine if the match is sorted
+            //  - TokenStream; token stream of the path, since path.span() does not work as expected
+            let pattern_idents: Vec<(String, TokenStream)> = i.arms
                 .iter()
                 .filter_map(|x| {
-                    if let Pat::TupleStruct(tuple_struct) = &x.pat {
-                        if let Some(path_segment) = tuple_struct.path.segments.first() {
-                            Some(&path_segment.ident)
-                        } else {
+                    match &x.pat {
+                        Pat::Path(path) => {
+                            let parts: Vec<String> = path.path.segments
+                                .iter()
+                                .map(|x| format!("{}", x.ident)).collect();
+                            Some((parts.join("::"), path.path.to_token_stream()))
+                        },
+                        Pat::Struct(struc) => {
+                            let parts: Vec<String> = struc.path.segments
+                                .iter()
+                                .map(|x| format!("{}", x.ident)).collect();
+                            Some((parts.join("::"), struc.path.to_token_stream()))
+                        },
+                        Pat::TupleStruct(tuple_struct) => {
+                            let parts: Vec<String> = tuple_struct.path.segments
+                                .iter()
+                                .map(|x| { format!("{}", x.ident) }).collect();
+                            Some((parts.join("::"), tuple_struct.path.to_token_stream()))
+                        },
+                        _ => {
+                            self.errors.push(
+                                syn::Error::new_spanned(x.pat.to_token_stream(), "unsupported by #[sorted]")
+                            );
                             None
-                        }
-                    } else {
-                        // Unsupported, filtered out
-                        None
+                        },
                     }
                 }).collect();
 
-            // Determine if the expression is sorted
-            if !pattern_idents.is_sorted() {
-                let (unsorted_index, should_be_index): (usize, usize) = find_unsorted_element(&pattern_idents);
+            let ident_str_vec: Vec<&String> = pattern_idents.iter().map(|(i, _ts)| i).collect();
+            let tokenstream_vec: Vec<&TokenStream> = pattern_idents.iter().map(|(_i, ts)| ts).collect();
 
-                let unsorted_element: &Ident = &pattern_idents[unsorted_index];
-                let should_be_elmt: &Ident = &pattern_idents[should_be_index];
+            // Determine if the expression is sorted
+            if !ident_str_vec.is_sorted() {
+                let (unsorted_index, should_be_index): (usize, usize) = find_unsorted_element(&ident_str_vec);
+
+                let unsorted_element: &str = &ident_str_vec[unsorted_index];
+                let should_be_elmt: &str = &ident_str_vec[should_be_index];
                 let error_message: String = format!("{} should sort before {}", unsorted_element, should_be_elmt);
 
-                self.errors.push(syn::Error::new(pattern_idents[unsorted_index].span(), error_message));
+                self.errors.push(syn::Error::new_spanned(tokenstream_vec[unsorted_index], error_message));
             }
 
             // Remove the attribute

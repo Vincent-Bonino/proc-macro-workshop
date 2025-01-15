@@ -84,6 +84,6 @@ fn _check(mut input_item_fn: ItemFn) -> Result<TokenStream2, (TokenStream2, syn:
     if visitor.errors.is_empty() {
         Ok(result)
     } else {
-        Err((result, visitor.errors.pop().unwrap()))
+        Err((result, visitor.errors.first().unwrap().clone()))
     }
 }
