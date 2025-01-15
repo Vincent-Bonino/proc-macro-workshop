@@ -31,6 +31,9 @@ impl VisitMut for CheckSortedMatch {
                 .iter()
                 .filter_map(|x| {
                     match &x.pat {
+                        Pat::Ident(ident) => {
+                            Some((format!("{}", ident.ident), ident.to_token_stream()))
+                        },
                         Pat::Path(path) => {
                             let parts: Vec<String> = path.path.segments
                                 .iter()
@@ -49,6 +52,9 @@ impl VisitMut for CheckSortedMatch {
                                 .map(|x| { format!("{}", x.ident) }).collect();
                             Some((parts.join("::"), tuple_struct.path.to_token_stream()))
                         },
+                        Pat::Wild(wild) => {
+                            Some((String::from("_"), wild.underscore_token.to_token_stream()))
+                        }
                         _ => {
                             self.errors.push(
                                 syn::Error::new_spanned(x.pat.to_token_stream(), "unsupported by #[sorted]")
